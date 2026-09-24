@@ -1,0 +1,205 @@
+---
+title: "Replicating a Published Butterfly Biodiversity Analysis in R"
+subtitle: "ANOVA, detrended correspondence analysis (DCA), and correspondence analysis (CA)"
+author: "Nikolay Winslow"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 2
+    theme: cosmo
+    code-fold: true
+    code-summary: "Show code"
+execute:
+  warning: false
+  message: false
+editor:
+  markdown:
+    wrap: 72
+---
+
+## Overview
+
+This report replicates the main analyses from Loos et al. (2014), a study
+of butterfly communities across different land-use types. The goals are
+to:
+
+1.  Prepare the data so that only arable and grassland sites remain.
+2.  Reproduce the study's descriptive statistics and ANOVA results.
+3.  Reproduce the detrended correspondence analysis (DCA) shown in
+    Figure 2 of the paper (without the environmental vectors).
+4.  Run a correspondence analysis (CA) on transformed data and compare it
+    with the DCA.
+
+The data is publicly available at
+[Dryad](https://doi.org/10.5061/dryad.97s1k). Where my results differ
+from the published ones, the differences are noted and discussed.
+
+## Setup
+
+```{r}
+library(readxl)
+library(vegan)
+library(dplyr)
+
+# Dataset: Loos et al. (2014) butterfly survey, publicly available on Dryad
+# https://doi.org/10.5061/dryad.97s1k
+data <- read_excel("Loos+et+al+2014+Butterflies.xls")
+```
+
+## 1. Data Preparation
+
+The dataset contains site identifiers, species counts, and a final block
+of environmental variables. The steps below:
+
+-   remove forest sites (`LUtype == "F"`) so only arable and grassland
+    sites remain,
+-   split the species counts from the environmental variables, and
+-   drop species that never occurred in the remaining sites (some
+    species were recorded only in forest).
+
+```{r}
+# Keep only arable and grassland sites
+data2 <- data %>%
+  filter(LUtype != "F")
+
+# Column layout: column 1 = site ID, then species counts, then the final
+# 16 columns are environmental variables
+n_env <- 16
+
+env     <- data2[, (ncol(data2) - n_env + 1):ncol(data2)]
+species <- data2[, 2:(ncol(data2) - n_env)]
+
+# Remove species with no occurrences in the remaining sites
+species <- species[, colSums(species) > 0]
+
+# Land-use type as a factor, reused for colouring the ordination plots
+lu      <- factor(data2$LUtype)
+lu_cols <- seq_along(levels(lu))
+
+cat("Sites:", nrow(species), "| Species:", ncol(species), "\n")
+```
+
+## 2. Descriptive Statistics and ANOVA
+
+```{r}
+# Totals and ranges
+total_individuals <- sum(species)
+num_species       <- ncol(species)
+richness          <- rowSums(species > 0)  # species richness per site
+abundance         <- rowSums(species)      # individuals per site
+
+summary_stats <- list(
+  total_individuals = total_individuals,
+  num_species       = num_species,
+  richness_range    = range(richness),
+  abundance_range   = range(abundance)
+)
+print(summary_stats)
+
+# Most abundant species (proportion of all individuals)
+species_rel <- sort(colSums(species) / total_individuals, decreasing = TRUE)
+print(head(species_rel, 12))
+```
+
+```{r}
+# Does species richness differ between land-use types?
+anova_richness <- aov(richness ~ LUtype, data = data2)
+summary(anova_richness)
+
+# Does abundance differ between land-use types?
+anova_abundance <- aov(abundance ~ LUtype, data = data2)
+summary(anova_abundance)
+```
+
+**Comparison with the paper.** The statistics almost entirely match the
+published values. The exceptions are the range of species richness per
+site (3-47 here versus 3-45 in the paper) and the total counts of
+individuals and species, which differ slightly, possibly because of
+known taxonomic inconsistencies in the dataset. The most abundant
+species and the ANOVA results for richness and abundance match the
+paper. As the paper reports, the ANOVA results show little difference
+between arable and grassland sites in either richness or abundance.
+
+## 3. Detrended Correspondence Analysis (DCA)
+
+```{r}
+#| fig-cap: "DCA of butterfly assemblages by site, coloured by land-use type (replication of Figure 2 without environmental vectors)."
+dca_model <- decorana(species)
+
+plot(dca_model, type = "n", xlim = c(-1.5, 2), ylim = c(-1, 1.5))
+points(dca_model, display = "sites", col = as.integer(lu), pch = 19)
+legend("topright", legend = levels(lu), col = lu_cols, pch = 19)
+```
+
+**Comparison with the paper.** The DCA was carried out successfully and
+matches Figure 2 of the study.
+
+## 4. Correspondence Analysis (CA)
+
+Butterfly counts are highly skewed, so the counts were log-transformed
+before running CA, using the `log` method in `vegan::decostand()`
+(log(x) + 1 for non-zero counts; zeros stay zero).
+
+```{r}
+species_log <- decostand(species, method = "log")
+
+ca_model <- cca(species_log)
+
+# Variance explained by each axis
+eig_vals      <- eigenvals(ca_model)
+var_explained <- eig_vals / sum(eig_vals)
+
+cat(sprintf("Variance explained by CA1: %.1f%%\n", 100 * var_explained[1]))
+cat(sprintf("Variance explained by CA2: %.1f%%\n", 100 * var_explained[2]))
+```
+
+```{r}
+#| fig-cap: "CA of log-transformed butterfly data by site, coloured by land-use type."
+plot(ca_model, type = "n")
+points(ca_model, display = "sites", col = as.integer(lu), pch = 19)
+legend("topright", legend = levels(lu), col = lu_cols, pch = 19)
+```
+
+**Interpretation.** The first two CA axes together explain only about
+10% of the variance, which indicates that no single dominant factor
+explains the distribution of the butterflies. An arch effect is visible
+to some extent in the CA: points condense near the origin, while values
+spread farther apart on CA1 as CA2 decreases. This differs from the
+DCA, where arable sites are spread along DCA1 and grassland sites along
+DCA2, forming a very loose L-shaped pattern. The parabolic structure of
+the CA makes the groupings look more discrete than they are, whereas the
+detrended analysis shows only a vague trend. Given the low variance
+explained by each CA axis and CA's tendency to produce an arch, the DCA
+appears to give the more accurate representation of the data.
+
+## Conclusions
+
+-   The descriptive statistics, most abundant species, and ANOVA results
+    replicate the published findings, apart from small differences in the
+    richness range and in total individual and species counts.
+-   Species richness and abundance differ little between arable and
+    grassland sites.
+-   The DCA reproduces Figure 2 of the paper.
+-   A CA of log-transformed data explains about 10% of the variance on
+    its first two axes and shows an arch effect, so the DCA is the better
+    representation of these data.
+
+## Reproducibility
+
+```{r}
+sessionInfo()
+```
+
+## Reference
+
+Loos, J., Dorresteijn, I., Hanspach, J., Fust, P., Rakosy, L., &
+Fischer, J. (2014). Low-intensity agricultural landscapes in Transylvania
+support high butterfly diversity: implications for conservation. *PLoS
+ONE, 9*(7), e103256.
+
+Loos, J., Dorresteijn, I., Hanspach, J., Fust, P., Rakosy, L., &
+Fischer, J. (2015). *Data from: Low-intensity agricultural landscapes in
+Transylvania support high butterfly diversity: implications for
+conservation* [Dataset]. Dryad. <https://doi.org/10.5061/dryad.97s1k>
