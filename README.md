@@ -54,7 +54,8 @@ The file is included in `data/` as `Loos+et+al+2014+Butterflies.xls`. It contain
    install.packages(c("readxl", "vegan", "dplyr"))
    ```
 
-3. If `data/` is empty, download the dataset from [Dryad](https://doi.org/10.5061/dryad.97s1k) and save it as `Loos+et+al+2014+Butterflies.xls` in the same folder as the QMD.
+3. a. If 'data/' is not empty, modify the file path in the QMD to match read_excel("../data/Loos+et+al+2014+Butterflies.xls")
+   b. If `data/` is empty, download the dataset from [Dryad](https://doi.org/10.5061/dryad.97s1k) and save it as `Loos+et+al+2014+Butterflies.xls` in the same folder as the QMD.
 4. Render the report from the repository root:
 
    ```bash
